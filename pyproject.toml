@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "super-mario-bros"
+version = "0.1.0"
+description = ""
+authors = ["thomas rigby <tomr0607@hotmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+gym-super-mario-bros = "^7.4.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
