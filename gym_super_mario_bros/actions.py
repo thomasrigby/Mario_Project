@@ -12,6 +12,8 @@ RIGHT_ONLY = [
 
 
 # actions for very simple movement
+# A is to jump
+# B is to run
 SIMPLE_MOVEMENT = [
     ['NOOP'],
     ['right'],
