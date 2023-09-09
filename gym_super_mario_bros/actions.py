@@ -7,7 +7,7 @@ RIGHT_ONLY = [
     ['right'],
     ['right', 'A'],
     ['right', 'B'],
-    ['right', 'A', 'B'],
+    ['right', 'A', 'B'], # Jump and run right
 ]
 
 
@@ -16,12 +16,12 @@ RIGHT_ONLY = [
 # B is to run
 SIMPLE_MOVEMENT = [
     ['NOOP'],
-    ['right'],
-    ['right', 'A'],
-    ['right', 'B'],
-    ['right', 'A', 'B'],
-    ['A'],
-    ['left'],
+    ['right'], # Walk right
+    ['right', 'A'], # Jump right 
+    ['right', 'B'], # Run right
+    ['right', 'A', 'B'], # Jump and run right
+    ['A'], # Jump only
+    ['left'], # Walk left
 ]
 
 

@@ -3,6 +3,7 @@ import numpy as np
 from nes_py.wrappers import JoypadSpace
 import gym_super_mario_bros
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
+import matplotlib.pyplot as plt
 import gym
 import time
 
@@ -17,7 +18,7 @@ RIGHT_SPEED_JUMP = 4
 
 # Custom jump action (hold 'A' button for longer)
 #This is hard coded atm (change number that is * to see speed)
-CUSTOM_JUMP = [4] * 51 # Hold 'A' button for 27 frames
+CUSTOM_JUMP = [4] * 23 # Hold 'A' button for 27 frames
 
 # Goomba Color Range
 lower_bound_goomba = np.array([0, 237, 227])
@@ -97,9 +98,17 @@ def detect_obstacle(frame, mario_x_position):
 #this needs fixing 
 #will check colour of absent ground and jump before with mask
 def detect_ground(frame):
-    # Detect ground by color (you may need to adjust these values)
-    mask_ground = cv2.inRange(frame, lower_bound_ground, upper_bound_ground)
-    return np.any(mask_ground)
+    # 1. Identify the Sky Color:
+    sky_row = 10  # Y-coordinate for a row that's always in the sky
+    sky_color = frame[sky_row, frame.shape[1] // 2]  # Color in the middle of that row
+
+    # 2. Detect Missing Ground:
+    ground_row = int(frame.shape[0] * 0.9)  # Y-coordinate near the bottom (90% of the frame's height)
+    ground_color = frame[ground_row, frame.shape[1] // 2 + 15]  # Color in the middle of that row
+
+    is_missing_ground = np.array_equal(sky_color, ground_color)
+    
+    return is_missing_ground
 
 done = True
 env.reset()
@@ -109,6 +118,15 @@ for step in range(5000):
     obs, reward, terminated, truncated, info = env.step(action_index)
     
     mario_x_position = info["x_pos"]
+    
+    # Check for ground detection every frame
+    ground_detected = detect_ground(obs)
+    if ground_detected:
+        for jump_frame in CUSTOM_JUMP:
+            obs, reward, terminated, truncated, info = env.step(RIGHT_JUMP)
+        no_ground_detected = True
+    else:
+        no_ground_detected = False
     
     if last_x_position is not None and last_x_position == mario_x_position:
         stopped_frames += 1
@@ -123,15 +141,6 @@ for step in range(5000):
                         for jump_frame in CUSTOM_JUMP:
                             obs, reward, terminated, truncated, info = env.step(RIGHT_JUMP)
                     print(f"Obstacle detected when Mario stopped! Aspect Ratio: {aspect_ratio:.2f} Height: {height}")
-
-        # Check for ground detection
-        ground_detected = detect_ground(obs)
-        if not ground_detected:
-            # Perform a jump action if no ground detected
-            obs, reward, terminated, truncated, info = env.step(RIGHT_JUMP)
-            no_ground_detected = True
-        else:
-            no_ground_detected = False
 
     else:
         stopped_frames = 0
