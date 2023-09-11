@@ -81,33 +81,7 @@ upper_bound_ground = np.array([179, 255, 247])
 lower_bound_koopa = np.array([0, 0, 0])
 upper_bound_koopa = np.array([0, 0, 255])
 
-def analyze_koopa_aspect_ratio(frame_path):
-    frame = cv2.imread(frame_path)
 
-    if frame is None:
-        print(f"Failed to load the frame from {frame_path}")
-        return
-
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask_koopa = cv2.inRange(hsv, lower_bound_koopa, upper_bound_koopa)
-
-    # Find contours in the Koopa mask
-    contours, _ = cv2.findContours(mask_koopa, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    # Analyze aspect ratios
-    for contour in contours:
-        if cv2.contourArea(contour) > 50:  # Only consider significant contours
-            x, y, w, h = cv2.boundingRect(contour)
-            aspect_ratio = w / h
-            print(f"Aspect Ratio of detected Koopa: {aspect_ratio}")
-
-            # Just for visualization
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-    
-    # Display the frame with detected Koopas
-    cv2.imshow('Koopa Detection', frame)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
 
 INITIAL_DELAY = 20  # Added constant for initial delay
 
