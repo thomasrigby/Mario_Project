@@ -11,7 +11,7 @@ from gym.wrappers import FrameStack
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.env_checker import check_env
-
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 # --------------------------------
 
 
@@ -320,13 +320,19 @@ class SaveOnStepCallback(BaseCallback):
 
 
 ################################################################################
-env = gym.make("SuperMarioBros-v0", apply_api_compatibility=True, render_mode="human")
-JoypadSpace.reset = lambda self, **kwargs: self.env.reset(**kwargs)
-env = JoypadSpace(env, RIGHT_ONLY)
-obs = env.reset()
-env = SkipFrame(env, skip=5)
-env = GrayScaleObservation(env)
-env = ResizeObservation(env, shape=84)
+def make_env():
+    env = gym.make("SuperMarioBros-v0", apply_api_compatibility=True, render_mode="human")
+    JoypadSpace.reset = lambda self, **kwargs: self.env.reset(**kwargs)
+    env = JoypadSpace(env, RIGHT_ONLY)
+    obs = env.reset()
+    env = SkipFrame(env, skip=5)
+    env = GrayScaleObservation(env)
+    env = ResizeObservation(env, shape=84)
+    return env
+
+# Create 3 parallel environments
+num_envs = 3
+env = DummyVecEnv([make_env for _ in range(num_envs)])  # Change DummyVecEnv to SubprocVecEnv for true parallelism
 
 model = PPO(
     "MlpPolicy",
