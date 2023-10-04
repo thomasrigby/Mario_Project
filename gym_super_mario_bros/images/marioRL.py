@@ -1,10 +1,11 @@
 from nes_py.wrappers import JoypadSpace
-from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
+from gym_super_mario_bros.actions import RIGHT_ONLY
 import gym
 import cv2 as cv
 import numpy as np
 import string
-import numpy as np
+from gym.spaces import Box
+from gym.wrappers import FrameStack
 
 # ------- STABLE BASELINE --------
 from stable_baselines3 import PPO
@@ -26,8 +27,6 @@ SKY_COLOUR = None
 JUMP_FRAMES = 15
 
 # Define basic actions for clarity
-RIGHT = 1
-RIGHT_JUMP = 2
 ################################################################################
 # TEMPLATES FOR LOCATING OBJECTS
 
@@ -258,20 +257,103 @@ def reset(*args, **kwargs):
 NESEnv.reset = reset
 
 ################################################################################
+# WRAPPERS
+
+# https://pytorch.org/tutorials/intermediate/mario_rl_tutorial.html
+class SkipFrame(gym.Wrapper):
+    def __init__(self, env, skip):
+        """Return only every `skip`-th frame"""
+        super().__init__(env)
+        self._skip = skip
+
+    def step(self, action):
+        """Repeat action, and sum reward"""
+        total_reward = 0.0
+        for i in range(self._skip):
+            # Accumulate reward and repeat the same action
+            obs, reward, done, trunk, info = self.env.step(action)
+            total_reward += reward
+            if done:
+                break
+        return obs, total_reward, done, trunk, info
+
+class GrayScaleObservation(gym.ObservationWrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        obs_shape = self.observation_space.shape[:2]
+        self.observation_space = Box(low=0, high=255, shape=obs_shape, dtype=np.uint8)
+
+    def observation(self, observation):
+        observation = cv.cvtColor(observation, cv.COLOR_RGB2GRAY)
+        return observation
+
+class ResizeObservation(gym.ObservationWrapper):
+    def __init__(self, env, shape):
+        super().__init__(env)
+        if isinstance(shape, int):
+            self.shape = (shape, shape)
+        else:
+            self.shape = tuple(shape)
+
+        obs_shape = self.shape + self.observation_space.shape[2:]
+        self.observation_space = Box(low=0, high=255, shape=obs_shape, dtype=np.uint8)
+
+    def observation(self, observation):
+        observation = cv.resize(observation, self.shape, interpolation=cv.INTER_AREA)
+        return observation
+
+
+
+from stable_baselines3.common.callbacks import BaseCallback
+
+class SaveOnStepCallback(BaseCallback):
+    def __init__(self, check_freq: int, save_path: str, verbose=0):
+        super(SaveOnStepCallback, self).__init__(verbose)
+        self.check_freq = check_freq
+        self.save_path = save_path
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps % self.check_freq == 0:
+            self.model.save(self.save_path)
+            print(f"Model saved to {self.save_path} at step {self.num_timesteps}")
+        return True
+
+
+################################################################################
 env = gym.make("SuperMarioBros-v0", apply_api_compatibility=True, render_mode="human")
 JoypadSpace.reset = lambda self, **kwargs: self.env.reset(**kwargs)
-env = JoypadSpace(env, SIMPLE_MOVEMENT)
-# check_env(env, warn=True)
-
-model = PPO("MlpPolicy", env, verbose=1)
-# model.load("ppo_mario")
-model.learn(total_timesteps=1000)
-model.save("ppo_mario")
-
+env = JoypadSpace(env, RIGHT_ONLY)
 obs = env.reset()
+env = SkipFrame(env, skip=5)
+env = GrayScaleObservation(env)
+env = ResizeObservation(env, shape=84)
+
+model = PPO(
+    "MlpPolicy",
+    env,
+    verbose=1,
+    learning_rate=0.0005,
+    gamma=0.99,
+    n_steps=2048,
+    ent_coef=0.001,
+    clip_range=0.15,
+    n_epochs=12,
+    gae_lambda=0.95,
+    max_grad_norm=0.7,
+    vf_coef=0.25
+)
+model.load("ppo_mario")
+
+model.save("ppo_mario")
+save_callback = SaveOnStepCallback(check_freq=1000, save_path='ppo_mario')
+model.learn(total_timesteps=20000, callback=save_callback)
+
+obs, info = env.reset()
 while True:
     action = make_action(obs)
     obs, reward, done, info = env.step(action)
 
     if done:
         obs = env.reset()
+
+    

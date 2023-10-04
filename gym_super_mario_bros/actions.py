@@ -20,7 +20,6 @@ SIMPLE_MOVEMENT = [
     ['right', 'A'], # Jump right 
     ['right', 'B'], # Run right
     ['right', 'A', 'B'], # Jump and run right
-    ['right', 'A' * 20] # Jump right for 20 frames
     ['A'], # Jump only
     ['left'], # Walk left
 ]
