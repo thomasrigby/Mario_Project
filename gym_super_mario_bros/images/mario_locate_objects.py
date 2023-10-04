@@ -37,7 +37,8 @@ image_files = {
         "koopa": ["koopaA.png", "koopaB.png"],
     },
     "block": {
-        "block": ["block1.png", "block2.png", "block3.png", "block4.png"],
+        "block": ["block1.png", "block2.png", "block3.png"],
+        "stair": ["block4.png"],
         "question_block": ["questionA.png", "questionB.png", "questionC.png"],
         "pipe": ["pipe_upper_section.png", "pipe_lower_section.png"],
     },
@@ -234,6 +235,25 @@ def locate_objects(screen, mario_status):
     return object_locations
 
 ################################################################################
+# LOCATE STAIRS 
+def is_stair_in_front(mario_location, block_locations, mario_width):
+    mario_x, mario_y = mario_location
+    
+    for block_location, block_dimensions, block_name in block_locations:
+        if block_name != "stair":
+            continue
+        block_x, block_y = block_location
+        block_width, block_height = block_dimensions
+        
+        # Check if the stair block is right in front of Mario
+        if block_x > mario_x and (block_x - mario_x) < mario_width + 15:
+            
+            # Check if the stair block is higher than Mario
+            if block_y < mario_y:
+                return True, block_y - mario_y
+    return False, 0
+
+################################################################################
 # GETTING INFORMATION AND CHOOSING AN ACTION
 
 def make_action(screen, info, step, env, prev_action):
@@ -259,8 +279,8 @@ def make_action(screen, info, step, env, prev_action):
             enemy_width, enemy_height = enemy_dimensions
 
             if mario_y + mario_height > enemy_y and mario_y < enemy_y + enemy_height: 
-                if enemy_x - (mario_x + mario_width) < 40: 
-                    small_jump()
+                if enemy_x - (mario_x + mario_width) < 15: 
+                    jump(10)
                     return RIGHT
  
         for block_location, block_dimensions, block_name in block_locations:
@@ -270,25 +290,31 @@ def make_action(screen, info, step, env, prev_action):
             if block_name == "pipe":
                 # Check if the pipe is in front of Mario
                 if block_x > mario_x and block_x - (mario_x + mario_width) < 40:
-                    big_jump()
+                    jump(20)
                     return RIGHT
-
-
+                    
+        for block_location, block_dimensions, block_name in block_locations:
+            block_x, block_y = block_location
+            block_width, block_height = block_dimensions
+            if block_name == "stair":
+                #print("Stair detected")
+                # Check if there's a stair in front of Mario
+                if block_x > mario_x and block_x - (mario_x + mario_width) < 7:
+                    env.step(RIGHT)
+                    jump(20)
+                    
+                
         if detect_ground(screen):
-            big_jump()
+            jump(55)
+            print("No ground detected")
             return RIGHT
     # Default action: move towards the right
     return RIGHT
 
 
-def small_jump():
-    for i in range(5):
+def jump(x):
+    for i in range(x):
         env.step(RIGHT_JUMP)
-
-def big_jump():
-    for i in range(20):
-        env.step(RIGHT_JUMP)
-
 
 
 
