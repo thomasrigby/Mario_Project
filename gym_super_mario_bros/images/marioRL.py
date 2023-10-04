@@ -242,19 +242,30 @@ def locate_objects(screen, mario_status):
 ################################################################################
 # GETTING INFORMATION AND CHOOSING AN ACTION
 def make_action(obs):
-    action, _states = model.predict(obs, deterministic=True)
+    # Assume obs is a tuple and the relevant data is in the first element
+    obs_array = np.array(obs[0])
+    action, _states = model.predict(obs_array, deterministic=True)
     return action
 
+from nes_py import NESEnv
+_reset = NESEnv.reset
 
+def reset(*args, **kwargs):
+    obs_info = _reset(*args, **kwargs)
+    obs, info = obs_info if type(obs_info) == tuple else (obs_info, {})
+    return obs
+
+NESEnv.reset = reset
 
 ################################################################################
 env = gym.make("SuperMarioBros-v0", apply_api_compatibility=True, render_mode="human")
-# env = JoypadSpace(env, SIMPLE_MOVEMENT)
-JoypadSpace.reset = lambda self, kwargs: self.env.reset(kwargs)
+JoypadSpace.reset = lambda self, **kwargs: self.env.reset(**kwargs)
+env = JoypadSpace(env, SIMPLE_MOVEMENT)
 # check_env(env, warn=True)
 
 model = PPO("MlpPolicy", env, verbose=1)
-model.learn(total_timesteps=10000000)
+# model.load("ppo_mario")
+model.learn(total_timesteps=1000)
 model.save("ppo_mario")
 
 obs = env.reset()
