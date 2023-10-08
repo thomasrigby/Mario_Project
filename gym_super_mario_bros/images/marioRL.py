@@ -5,7 +5,8 @@ import cv2 as cv
 import numpy as np
 import string
 from gym.spaces import Box
-from gym.wrappers import FrameStack
+import matplotlib.pyplot as plt
+
 
 # ------- STABLE BASELINE --------
 from stable_baselines3 import PPO
@@ -26,9 +27,6 @@ SKY_COLOUR = None
 # Number of frames for which the jump button will be held
 JUMP_FRAMES = 15
 
-# Define basic actions for clarity
-################################################################################
-# TEMPLATES FOR LOCATING OBJECTS
 
 MASK_COLOUR = np.array([252, 136, 104])
 
@@ -43,7 +41,8 @@ image_files = {
         "koopa": ["koopaA.png", "koopaB.png"],
     },
     "block": {
-        "block": ["block1.png", "block2.png", "block3.png", "block4.png"],
+        "block": ["block1.png", "block2.png", "block3.png"],
+        "stair": ["block4.png"],
         "question_block": ["questionA.png", "questionB.png", "questionC.png"],
         "pipe": ["pipe_upper_section.png", "pipe_lower_section.png"],
     },
@@ -223,6 +222,7 @@ def locate_objects(screen, mario_status):
                     continue
                 else:
                     stop_early = True
+            # pipe has special logic, so skip it for now
             if object_name == "pipe":
                 continue
             
@@ -240,26 +240,25 @@ def locate_objects(screen, mario_status):
 
 ################################################################################
 # GETTING INFORMATION AND CHOOSING AN ACTION
-def make_action(obs):
-    # Assume obs is a tuple and the relevant data is in the first element
-    obs_array = np.array(obs[0])
-    action, _states = model.predict(obs_array, deterministic=True)
-    return action
 
 from nes_py import NESEnv
 _reset = NESEnv.reset
 
 def reset(*args, **kwargs):
     obs_info = _reset(*args, **kwargs)
-    obs, info = obs_info if type(obs_info) == tuple else (obs_info, {})
-    return obs
+    if isinstance(obs_info, tuple):
+        obs, info = obs_info
+        return obs
+    else:
+        return obs_info
+
 
 NESEnv.reset = reset
 
 ################################################################################
 # WRAPPERS
 
-# https://pytorch.org/tutorials/intermediate/mario_rl_tutorial.html
+
 class SkipFrame(gym.Wrapper):
     def __init__(self, env, skip):
         """Return only every `skip`-th frame"""
@@ -269,23 +268,43 @@ class SkipFrame(gym.Wrapper):
     def step(self, action):
         """Repeat action, and sum reward"""
         total_reward = 0.0
+        done = False
+        info = {}
         for i in range(self._skip):
-            # Accumulate reward and repeat the same action
-            obs, reward, done, trunk, info = self.env.step(action)
+            obs, reward, done, truncated, info = self.env.step(action)
             total_reward += reward
             if done:
                 break
-        return obs, total_reward, done, trunk, info
+        return obs, total_reward, done, truncated, info
 
-class GrayScaleObservation(gym.ObservationWrapper):
+
+class CustomRewardWrapper(gym.Wrapper):
     def __init__(self, env):
-        super().__init__(env)
-        obs_shape = self.observation_space.shape[:2]
-        self.observation_space = Box(low=0, high=255, shape=obs_shape, dtype=np.uint8)
+        super(CustomRewardWrapper, self).__init__(env)
 
-    def observation(self, observation):
-        observation = cv.cvtColor(observation, cv.COLOR_RGB2GRAY)
-        return observation
+        self.last_info = None  # Initialize last_info
+
+    def step(self, action):
+        obs, reward, done, truncated, info = self.env.step(action)
+        
+        # If last_info is None (i.e., the first step), set it to the current info
+        if self.last_info is None:
+            self.last_info = info
+
+        # Modify the reward
+        reward += custom_reward(info, self.last_info)
+        
+
+        self.last_info = info
+
+
+        truncated = False  # Set a default value or compute it based on your needs
+        return obs, reward, done, truncated, info
+
+    def reset(self, **kwargs):
+        self.last_info = None
+        return self.env.reset(**kwargs)
+
 
 class ResizeObservation(gym.ObservationWrapper):
     def __init__(self, env, shape):
@@ -302,64 +321,93 @@ class ResizeObservation(gym.ObservationWrapper):
         observation = cv.resize(observation, self.shape, interpolation=cv.INTER_AREA)
         return observation
 
-
-
-from stable_baselines3.common.callbacks import BaseCallback
-
-class SaveOnStepCallback(BaseCallback):
-    def __init__(self, check_freq: int, save_path: str, verbose=0):
-        super(SaveOnStepCallback, self).__init__(verbose)
-        self.check_freq = check_freq
-        self.save_path = save_path
-
-    def _on_step(self) -> bool:
-        if self.num_timesteps % self.check_freq == 0:
-            self.model.save(self.save_path)
-            print(f"Model saved to {self.save_path} at step {self.num_timesteps}")
-        return True
-
-
 ################################################################################
 def make_env():
     env = gym.make("SuperMarioBros-v0", apply_api_compatibility=True, render_mode="human")
     JoypadSpace.reset = lambda self, **kwargs: self.env.reset(**kwargs)
     env = JoypadSpace(env, RIGHT_ONLY)
     obs = env.reset()
+
+    env = ResizeObservation(env, 84)
     env = SkipFrame(env, skip=5)
-    env = GrayScaleObservation(env)
-    env = ResizeObservation(env, shape=84)
-    return env
+    env = CustomRewardWrapper(env)
 
-# Create 3 parallel environments
-num_envs = 3
-env = DummyVecEnv([make_env for _ in range(num_envs)])  # Change DummyVecEnv to SubprocVecEnv for true parallelism
+    return DummyVecEnv([lambda: env])
 
-model = PPO(
-    "MlpPolicy",
-    env,
-    verbose=1,
-    learning_rate=0.0005,
-    gamma=0.99,
-    n_steps=2048,
-    ent_coef=0.001,
-    clip_range=0.15,
-    n_epochs=12,
-    gae_lambda=0.95,
-    max_grad_norm=0.7,
-    vf_coef=0.25
-)
+def custom_reward(info, last_info):
+    reward = 0
+
+    # Distance Reward
+    reward += 20 * (info['x_pos'] - last_info['x_pos'])  
+
+
+    # Coin Reward
+    reward += (info['coins'] - last_info['coins']) * 5  # Assuming 5 points for each coin
+
+    # Life Penalty
+    if info['life'] < last_info['life']:
+        reward -= 1000  # Assuming a big penalty for losing a life
+
+    # Completion Bonus
+    if info['flag_get']:
+        reward += 1000
+
+    # Time Penalty
+    reward -= 0.5
+
+
+    return reward
+
+
+env = make_env()
+
+hyperparameters = {
+    # General
+    "learning_rate": 0.00008,         # Learning rate
+    "batch_size": 256,               # Batch size
+    "gamma": 0.99,                  # Discount factor
+    "ent_coef": 0.015,               # Entropy coefficient
+
+    # Other
+    "verbose": 1,                   # Verbosity level during training
+}
+
+
+# Create the PPO model with the specified hyperparameters
+model = PPO("MlpPolicy", env, **hyperparameters)
+
 model.load("ppo_mario")
-
+model.learn(total_timesteps=10000)
 model.save("ppo_mario")
-save_callback = SaveOnStepCallback(check_freq=1000, save_path='ppo_mario')
-model.learn(total_timesteps=20000, callback=save_callback)
 
-obs, info = env.reset()
-while True:
-    action = make_action(obs)
-    obs, reward, done, info = env.step(action)
 
-    if done:
-        obs = env.reset()
 
-    
+def plot_learning_curve(episode_rewards):
+    plt.figure(figsize=(10, 5))
+    plt.plot(episode_rewards, marker='o')
+    plt.title('Learning Curve')
+    plt.xlabel('Episode')
+    plt.ylabel('Episode Reward')
+    plt.grid(True)
+    plt.show()
+
+# Store episode rewards for plotting
+episode_rewards = []
+
+num_episodes = 10
+for episode in range(num_episodes):
+    obs = env.reset()
+    done = False
+    total_reward = 0
+    while not done:
+        obs = np.ascontiguousarray(obs)  # Ensure the observation has positive strides
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, done, truncated, info = env.step(action)
+        total_reward += reward
+    episode_rewards.append(total_reward)
+    print(f"Episode {episode + 1} finished. Total reward: {total_reward}")
+
+# Plot the learning curve
+plot_learning_curve(episode_rewards)
+
+env.close()
