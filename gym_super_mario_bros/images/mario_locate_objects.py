@@ -303,7 +303,29 @@ def make_action(screen, info, step, env, prev_action):
                     env.step(RIGHT)
                     jump(20)
                     
-                
+        # for block_location, block_dimensions, block_name in block_locations:
+        #     block_x, block_y = block_location
+        #     block_width, block_height = block_dimensions
+        #     if block_name == "block" or block_name == "question_block":
+        #         # Calculate Mario's head position (assuming Mario's y position is at the top)
+        #         mario_head_y = mario_y
+
+        #         # Set horizontal and vertical thresholds for block detection
+        #         horizontal_threshold = 40  # Adjust this value as needed
+        #         vertical_threshold = 20    # Adjust this value as needed
+
+        #         # Check if the block is both in front of Mario and above his head
+        #         if (
+        #             block_x > mario_x
+        #             and block_x - (mario_x + mario_width) < horizontal_threshold
+        #             and block_y + block_height < mario_head_y - vertical_threshold
+        #         ):
+        #             env.step(RIGHT_JUMP)  # Assuming UP is the action to jump
+        #             # Make Mario jump
+        #             jump(10)
+    
+  # Assuming UP is the action to jump
+
         if detect_ground(screen):
             jump(55)
             print("No ground detected")
