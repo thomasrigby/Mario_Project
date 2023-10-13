@@ -50,16 +50,10 @@ class CustomRewardWrapper(gym.Wrapper):
         # Modify the reward
         reward += custom_reward(info, self.last_info)
         
-
         self.last_info = info
 
-
-        truncated = False  # Set a default value or compute it based on your needs
+        truncated = False  
         return obs, reward, done, truncated, info
-
-    # def reset(self, **kwargs):
-    #     self.last_info = None
-    #     return self.env.reset(**kwargs)
 
 
 def custom_reward(info, last_info):
@@ -110,7 +104,7 @@ class SkipFrame(gym.Wrapper):
 
 
 def make_env():
-    env = gym.make('SuperMarioBros-v0', apply_api_compatibility=True, render_mode='human')
+    env = gym.make('SuperMarioBros-v0', apply_api_compatibility=True, render_mode="human")
     env = JoypadSpace(env, SIMPLE_MOVEMENT)
     JoypadSpace.reset = lambda self, **kwargs: self.env.reset(**kwargs)
     env = SkipFrame(env, skip=4)
@@ -121,10 +115,9 @@ def make_env():
 
 
 if __name__ == '__main__':
-    # JoypadSpace.reset = lambda self, **kwargs: self.env.reset(**kwargs)
     
     # Vectorize environment to run 4 at a time
-    num_envs = 2
+    num_envs = 1
     env = SubprocVecEnv([make_env for i in range(num_envs)])
 
     # Wrap the vectorized environment
@@ -133,13 +126,6 @@ if __name__ == '__main__':
     # Run training or model based on CLI value
     # If value given then run that model
     params = {
-        "batch_size": 256,
-        "n_epochs": 4,
-        "learning_rate": 0.00025,
-        "gamma": 0.99,
-        "gae_lambda": 0.95,
-        "clip_range": 0.1,
-        "ent_coef": 0.01,
         "verbose": 1,
         "tensorboard_log": "./logs"
     }
