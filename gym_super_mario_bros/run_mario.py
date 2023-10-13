@@ -1,231 +1,344 @@
-import cv2
-import numpy as np
 from nes_py.wrappers import JoypadSpace
-import gym_super_mario_bros
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
 import gym
-import time
-import os 
+import cv2 as cv
+import numpy as np
+import string
+import numpy as np
 
-# Initialize environment
-env = gym.make('SuperMarioBros-v0', apply_api_compatibility=True, render_mode="human")
-env = JoypadSpace(env, SIMPLE_MOVEMENT)
 
-# Define actions
+PRINT_GRID      = True
+PRINT_LOCATIONS = False
+IMAGE_DIR = './images/'
+SCREEN_HEIGHT   = 240
+SCREEN_WIDTH    = 256
+MATCH_THRESHOLD = 0.8
+SKY_COLOUR = None
+
+# Number of frames for which the jump button will be held
+JUMP_FRAMES = 15
+
+# Define basic actions for clarity
 RIGHT = 1
 RIGHT_JUMP = 2
+################################################################################
+# TEMPLATES FOR LOCATING OBJECTS
 
+MASK_COLOUR = np.array([252, 136, 104])
 
-# Custom jump action (hold 'A' button for longer)
-CUSTOM_JUMP = [4] * 23  # Hold 'A' button for 27 frames
+image_files = {
+    "mario": {
+        "small": ["marioA.png", "marioB.png", "marioC.png", "marioD.png",
+                  "marioE.png", "marioF.png", "marioG.png"],
+        "tall": ["tall_marioA.png", "tall_marioB.png", "tall_marioC.png"],
+    },
+    "enemy": {
+        "goomba": ["goomba.png"],
+        "koopa": ["koopaA.png", "koopaB.png"],
+    },
+    "block": {
+        "block": ["block1.png", "block2.png", "block3.png"],
+        "stair": ["block4.png"],
+        "question_block": ["questionA.png", "questionB.png", "questionC.png"],
+        "pipe": ["pipe_upper_section.png", "pipe_lower_section.png"],
+    },
+    "item": {
+        "mushroom": ["mushroom_red.png"],
+    }
+}
 
-# # # Create a window for trackbars
-# cv2.namedWindow('Trackbars')
+def _get_template(filename):
+    # Prepend the directory path to the filename
+    filepath = f"{IMAGE_DIR}{filename}"
+    image = cv.imread(filepath)
+    # -------------------------------------------
+    assert image is not None, f"File {filepath} does not exist."
+    template = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    mask = np.uint8(np.where(np.all(image == MASK_COLOUR, axis=2), 0, 1))
+    num_pixels = image.shape[0]*image.shape[1]
+    if num_pixels - np.sum(mask) < 10:
+        mask = None  # this is important for avoiding a problem where some things match everything
+    dimensions = tuple(template.shape[::-1])
+    return template, mask, dimensions
 
-# # Function to update Koopa color range using trackbars
-# def update_koopa_color_range(*args):
-#     global lower_bound_koopa, upper_bound_koopa
-#     lower_bound_koopa = np.array([
-#         cv2.getTrackbarPos('Lower H', 'Trackbars'),
-#         cv2.getTrackbarPos('Lower S', 'Trackbars'),
-#         cv2.getTrackbarPos('Lower V', 'Trackbars')
-#     ])
-#     upper_bound_koopa = np.array([
-#         cv2.getTrackbarPos('Upper H', 'Trackbars'),
-#         cv2.getTrackbarPos('Upper S', 'Trackbars'),
-#         cv2.getTrackbarPos('Upper V', 'Trackbars')
-#     ])
-#     display_koopa_mask()
+def get_template(filenames):
+    results = []
+    for filename in filenames:
+        results.append(_get_template(filename))
+    return results
 
-# def display_koopa_mask():
-#     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-#     mask_koopa = cv2.inRange(hsv, lower_bound_koopa, upper_bound_koopa)
-#     result = cv2.bitwise_and(frame, frame, mask=mask_koopa)
-#     cv2.imshow('Koopa Color Mask', result)
+def get_template_and_flipped(filenames):
+    results = []
+    for filename in filenames:
+        template, mask, dimensions = _get_template(filename)
+        results.append((template, mask, dimensions))
+        results.append((cv.flip(template, 1), cv.flip(mask, 1), dimensions))
+    return results
 
-# # Create trackbars for Koopa color range
-# cv2.createTrackbar('Lower H', 'Trackbars', 0, 179, update_koopa_color_range)
-# cv2.createTrackbar('Lower S', 'Trackbars', 0, 255, update_koopa_color_range)
-# cv2.createTrackbar('Lower V', 'Trackbars', 0, 255, update_koopa_color_range)
-# cv2.createTrackbar('Upper H', 'Trackbars', 179, 179, update_koopa_color_range)
-# cv2.createTrackbar('Upper S', 'Trackbars', 255, 255, update_koopa_color_range)
-# cv2.createTrackbar('Upper V', 'Trackbars', 255, 255, update_koopa_color_range)
+# Mario and enemies can face both right and left, so I'll also include
+# horizontally flipped versions of those templates.
+include_flipped = {"mario", "enemy"}
 
-# # Load the frame from the frames directory
-# frame_path = "frames/frame_80.png"
-# frame = cv2.imread(frame_path)
+# generate all templatees
+templates = {}
+for category in image_files:
+    category_items = image_files[category]
+    category_templates = {}
+    for object_name in category_items:
+        filenames = category_items[object_name]
+        if category in include_flipped or object_name in include_flipped:
+            category_templates[object_name] = get_template_and_flipped(filenames)
+        else:
+            category_templates[object_name] = get_template(filenames)
+    templates[category] = category_templates
 
-# # Check if the frame was loaded correctly
-# if frame is not None:
-#     # Display the frame and initial mask
-#     cv2.imshow('Loaded Frame', frame)
-#     display_koopa_mask()
-#     cv2.waitKey(0)
-#     cv2.destroyAllWindows()
-# else:
-#     print(f"Failed to load the frame from {frame_path}")
+################################################################################
+# PRINTING THE GRID (for debug purposes)
 
-# Goomba Color Range
-lower_bound_goomba = np.array([14, 0, 0])
-upper_bound_goomba = np.array([17, 184, 255])
+colour_map = {
+    (104, 136, 252): " ", # sky blue colour
+    (0,     0,   0): " ", # black
+    (252, 252, 252): "'", # white / cloud colour
+    (248,  56,   0): "M", # red / mario colour
+    (228,  92,  16): "%", # brown enemy / block colour
+}
+unused_letters = sorted(set(string.ascii_uppercase) - set(colour_map.values()),reverse=True)
+DEFAULT_LETTER = "?"
 
-# Pipe Color Ranges (using the values you provided)
-lower_bound_pipe = np.array([12, 196, 0])
-upper_bound_pipe = np.array([179, 254, 255])
+def _get_colour(colour): # colour must be 3 ints
+    colour = tuple(colour)
+    if colour in colour_map:
+        return colour_map[colour]
+    
+    # if we haven't seen this colour before, pick a letter to represent it
+    if unused_letters:
+        letter = unused_letters.pop()
+        colour_map[colour] = letter
+        return letter
+    else:
+        return DEFAULT_LETTER
 
-# Ground Color Range (you may need to adjust these values)
-lower_bound_ground = np.array([0, 237, 227])
-upper_bound_ground = np.array([179, 255, 247])
+def print_grid(obs, object_locations):
+    pixels = {}
+    # build the outlines of located objects
+    for category in object_locations:
+        for location, dimensions, object_name in object_locations[category]:
+            x, y = location
+            width, height = dimensions
+            name_str = object_name.replace("_", "-") + "-"
+            for i in range(width):
+                pixels[(x+i, y)] = name_str[i%len(name_str)]
+                pixels[(x+i, y+height-1)] = name_str[(i+height-1)%len(name_str)]
+            for i in range(1, height-1):
+                pixels[(x, y+i)] = name_str[i%len(name_str)]
+                pixels[(x+width-1, y+i)] = name_str[(i+width-1)%len(name_str)]
 
-# Koopa Color Range (using the values you provided)
-lower_bound_koopa = np.array([0, 0, 0])
-upper_bound_koopa = np.array([0, 0, 255])
+    # print the screen to terminal
+    print("-"*SCREEN_WIDTH)
+    for y in range(SCREEN_HEIGHT):
+        line = []
+        for x in range(SCREEN_WIDTH):
+            coords = (x, y)
+            if coords in pixels:
+                colour = pixels[coords]
+            else:
+                # get the colour symbol for this colour
+                colour = _get_colour(obs[y][x])
+            line.append(colour)
+        print("".join(line))
 
-
-
-INITIAL_DELAY = 20  # Added constant for initial delay
-
-last_x_position = None
-obstacle_detected = False  # Flag to keep track of obstacle detection
-no_ground_detected = False  # Flag to keep track of no ground detection
-
-# frame_counter = 0
-# frame_interval = 10  # Save a frame every 100 steps
-# frame_save_path = "frames"  # Directory to save frames
-
-# # Create the frames directory if it doesn't exist
-# os.makedirs(frame_save_path, exist_ok=True)
-
-# def save_frame(obs):
-#     global frame_counter
-#     if frame_counter % frame_interval == 0:
-#         frame_save_name = os.path.join(frame_save_path, f"frame_{frame_counter}.png")
-#         cv2.imwrite(frame_save_name, cv2.cvtColor(obs, cv2.COLOR_RGB2BGR))
-#     frame_counter += 1
-
-def detect_obstacle(frame, mario_x_position):
-    global last_x_position, obstacle_detected
-    # Adjusting the region of interest
-    region_start_percentage = 0.3
-    region_end_percentage = 0.8
-    vertical_start_percentage = 0.5  # Adjusted to avoid sky boxes
-    vertical_end_percentage = 0.9
-
-    region = frame[int(frame.shape[0] * vertical_start_percentage):int(frame.shape[0] * vertical_end_percentage),
-                   int(frame.shape[1] * region_start_percentage):int(frame.shape[1] * region_end_percentage)]
-
-    # Display the region
-    cv2.imshow('Region of Interest', region)
-    cv2.waitKey(1)
-
-    hsv_region = cv2.cvtColor(region, cv2.COLOR_RGB2HSV)
-
-    # Goomba Mask
-    mask_goomba = cv2.inRange(hsv_region, lower_bound_goomba, upper_bound_goomba)
-
-    # Pipe Masks
-    mask_pipe = cv2.inRange(hsv_region, lower_bound_pipe, upper_bound_pipe)
-
-    # Koopa Mask
-    mask_koopa = cv2.inRange(hsv_region, lower_bound_koopa, upper_bound_koopa)
-
-    # Combine Goomba, Pipe, and Koopa masks
-    mask_combined = cv2.bitwise_or(cv2.bitwise_or(mask_goomba, mask_pipe), mask_koopa)
-
-    # Debugging - Display the combined mask
-    cv2.imshow('Obstacle Detection Mask', mask_combined)
-    cv2.waitKey(1)
-
-    # Check for contours
-    contours, _ = cv2.findContours(mask_combined, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    obstacles_detected = []
-
-
-
-    for contour in contours:
-        if cv2.contourArea(contour) > 50:
-            
-            x, y, w, h = cv2.boundingRect(contour)
-            aspect_ratio = w/h
-            
-            obstacles_detected.append((aspect_ratio, h))
-            
-        
-            # Check aspect ratio for Goomba
-            if 1.7 <= aspect_ratio <= 1.8:
-                print("Goomba detected!")
-                return "goomba"
-
-            # Check aspect ratio for Pipe
-            if 1.8 <= aspect_ratio <= 2.8:  # Adjusted the value slightly for safety
-                print("Pipe detected!")
-                print(aspect_ratio)
-                return "pipe"
-
-            # Check aspect ratio for Koopa (assuming it's around 1.3 for this example)
-            if 1.44 <= aspect_ratio <= 1.46:
-                print("Koopa detected!")
-                return "koopa"
-
-
-    # Reset the obstacle detection flag when Mario moves
-    if mario_x_position != last_x_position:
-        obstacle_detected = False
-
-    return obstacles_detected
-
-# This needs fixing 
-# Will check color of absent ground and jump before with mask
 def detect_ground(frame):
-    # 1. Identify the Sky Color:
-    sky_row = 10  # Y-coordinate for a row that's always in the sky
-    sky_color = frame[sky_row, frame.shape[1] // 2]  # Color in the middle of that row
+    sky_row = 10
+    sky_color = frame[sky_row, frame.shape[1] // 2]  
 
-    # 2. Detect Missing Ground:
-    ground_row = int(frame.shape[0] * 0.9)  # Y-coordinate near the bottom (90% of the frame's height)
-    ground_color = frame[ground_row, frame.shape[1] // 2 + 15]  # Color in the middle of that row
+    ground_row = int(frame.shape[0] * 0.9)  
+    ground_color = frame[ground_row, frame.shape[1] // 2 + 15]
 
     is_missing_ground = np.array_equal(sky_color, ground_color)
-    
+
     return is_missing_ground
 
-done = True
-env.reset()
 
-action_index = RIGHT
-for step in range(5000):
-    obs, reward, terminated, truncated, info = env.step(action_index)
+################################################################################
+# LOCATING OBJECTS
+
+def _locate_object(screen, templates, stop_early=False, threshold=MATCH_THRESHOLD):
+    locations = {}
+    for template, mask, dimensions in templates:
+        results = cv.matchTemplate(screen, template, cv.TM_CCOEFF_NORMED, mask=mask)
+        locs = np.where(results >= threshold)
+        for y, x in zip(*locs):
+            locations[(x, y)] = dimensions
+
+
+        if stop_early and locations:
+            break
     
-    mario_x_position = info["x_pos"]
+    #      [((x,y), (width,height))]
+    return [( loc,  locations[loc]) for loc in locations]
+
+def _locate_pipe(screen, threshold=MATCH_THRESHOLD):
+    upper_template, upper_mask, upper_dimensions = templates["block"]["pipe"][0]
+    lower_template, lower_mask, lower_dimensions = templates["block"]["pipe"][1]
+
+    # find the upper part of the pipe
+    upper_results = cv.matchTemplate(screen, upper_template, cv.TM_CCOEFF_NORMED, mask=upper_mask)
+    upper_locs = list(zip(*np.where(upper_results >= threshold)))
     
-    # Check for ground detection every frame
-    ground_detected = detect_ground(obs)
-    if ground_detected:
-        for jump_frame in CUSTOM_JUMP:
-            obs, reward, terminated, truncated, info = env.step(RIGHT_JUMP)
-        no_ground_detected = True
-    else:
-        no_ground_detected = False
+    # stop early if there are no pipes
+    if not upper_locs:
+        return []
     
+    # find the lower part of the pipe
+    lower_results = cv.matchTemplate(screen, lower_template, cv.TM_CCOEFF_NORMED, mask=lower_mask)
+    lower_locs = set(zip(*np.where(lower_results >= threshold)))
 
-    obstacle = detect_obstacle(obs, mario_x_position)
+    # put the pieces together
+    upper_width, upper_height = upper_dimensions
+    lower_width, lower_height = lower_dimensions
+    locations = []
+    for y, x in upper_locs:
+        for h in range(upper_height, SCREEN_HEIGHT, lower_height):
+            if (y+h, x+2) not in lower_locs:
+                locations.append(((x, y), (upper_width, h), "pipe"))
+                break
+    return locations
 
-    if obstacle == "goomba" or obstacle == "pipe" or obstacle == "koopa":
-        # Perform a custom jump
-        for jump_frame in CUSTOM_JUMP:
-            obs, reward, terminated, truncated, info = env.step(RIGHT_JUMP)
-    else:
-        # Use a regular action
-        obs, reward, terminated, truncated, info = env.step(RIGHT)
+def locate_objects(screen, mario_status):
+    # convert to greyscale
+    screen = cv.cvtColor(screen, cv.COLOR_BGR2GRAY)
 
-    done = terminated or truncated
+    # iterate through our templates data structure
+    object_locations = {}
+    for category in templates:
+        category_templates = templates[category]
+        category_items = []
+        stop_early = False
+        for object_name in category_templates:
+            # use mario_status to determine which type of mario to look for
+            if category == "mario":
+                if object_name != mario_status:
+                    continue
+                else:
+                    stop_early = True
+            # pipe has special logic, so skip it for now
+            if object_name == "pipe":
+                continue
+            
+            # find locations of objects
+            results = _locate_object(screen, category_templates[object_name], stop_early)
+            for location, dimensions in results:
+                category_items.append((location, dimensions, object_name))
+
+        object_locations[category] = category_items
+
+    # locate pipes
+    object_locations["block"] += _locate_pipe(screen)
+
+    return object_locations
+
+################################################################################
+# LOCATE STAIRS 
+def is_stair_in_front(mario_location, block_locations, mario_width):
+    mario_x, mario_y = mario_location
+    
+    for block_location, block_dimensions, block_name in block_locations:
+        if block_name != "stair":
+            continue
+        block_x, block_y = block_location
+        block_width, block_height = block_dimensions
+        
+        # Check if the stair block is right in front of Mario
+        if block_x > mario_x and (block_x - mario_x) < mario_width + 15:
+            
+            # Check if the stair block is higher than Mario
+            if block_y < mario_y:
+                return True, block_y - mario_y
+    return False, 0
+
+################################################################################
+# GETTING INFORMATION AND CHOOSING AN ACTION
+
+def make_action(screen, info, step, env, prev_action, done):
+
+    mario_status = info["status"]
+    object_locations = locate_objects(screen, mario_status)
+
+    # List of locations of Mario:
+    mario_locations = object_locations["mario"]
+    enemy_locations = object_locations["enemy"]
+    block_locations = object_locations["block"]
+    item_locations = object_locations["item"]
+
+
+    if mario_locations:
+        mario_location, mario_dimensions, mario_name = mario_locations[0]
+        mario_x, mario_y = mario_location
+        mario_width, mario_height = mario_dimensions
+
+        # Check if there's an enemy in front of Mario
+        for enemy_location, enemy_dimensions, enemy_name in enemy_locations:
+            enemy_x, enemy_y = enemy_location
+            enemy_width, enemy_height = enemy_dimensions
+
+            if mario_y + mario_height > enemy_y and mario_y < enemy_y + enemy_height: 
+                if enemy_x - (mario_x + mario_width) < 15: 
+                    done = jump(10, done)
+                    return RIGHT, done
+ 
+        for block_location, block_dimensions, block_name in block_locations:
+            block_x, block_y = block_location
+            block_width, block_height = block_dimensions
+
+            if block_name == "pipe":
+                # Check if the pipe is in front of Mario
+                if block_x > mario_x and block_x - (mario_x + mario_width) < 40:
+                    done = jump(20,done)
+                    return RIGHT, done
+                    
+        for block_location, block_dimensions, block_name in block_locations:
+            block_x, block_y = block_location
+            block_width, block_height = block_dimensions
+            if block_name == "stair":
+                #print("Stair detected")
+                # Check if there's a stair in front of Mario
+                if block_x > mario_x and block_x - (mario_x + mario_width) < 7:
+                    env.step(RIGHT)
+                    done = jump(20,done)
+                    
+        if detect_ground(screen):
+            done = jump(55,done)
+            print("No ground detected")
+            return RIGHT, done
+
+    return RIGHT, done
+
+
+def jump(x, done):
+    for i in range(x):
+        if done:  # Check if done is true before each step
+            return True  # Return True if terminated early
+        _, _, done, _, _ = env.step(RIGHT_JUMP)  # Update done variable
+    return False 
+
+
+
+################################################################################
+
+env = gym.make("SuperMarioBros-v0", apply_api_compatibility=True, render_mode="human")
+env = JoypadSpace(env, SIMPLE_MOVEMENT)
+SKY_COLOUR = env.reset()[0][0]
+obs = env.reset()
+done = False
+action = RIGHT
+
+for step in range(100000):
     if done:
-        env.reset()
+        obs = env.reset()  # reset environment if done
+        action = RIGHT  # reset action if done
 
-    time.sleep(0.001)
-
-    # Capture and save frames
-    #save_frame(obs)
+    obs, reward, done, truncated, info = env.step(action)  # take a step
+    if not done:
+        action, done = make_action(obs, info, step, env, action, done)  # get next action
 
 env.close()
