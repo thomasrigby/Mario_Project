@@ -174,7 +174,6 @@ def _locate_object(screen, templates, stop_early=False, threshold=MATCH_THRESHOL
         if stop_early and locations:
             break
     
-    #      [((x,y), (width,height))]
     return [( loc,  locations[loc]) for loc in locations]
 
 def _locate_pipe(screen, threshold=MATCH_THRESHOLD):
@@ -246,9 +245,7 @@ def is_stair_in_front(mario_location, block_locations, mario_width):
         if block_name != "stair":
             continue
         block_x, block_y = block_location
-        block_width, block_height = block_dimensions
         
-        # Check if the stair block is right in front of Mario
         if block_x > mario_x and (block_x - mario_x) < mario_width + 15:
             
             # Check if the stair block is higher than Mario
@@ -268,8 +265,6 @@ def make_action(screen, info, step, env, prev_action, done):
     mario_locations = object_locations["mario"]
     enemy_locations = object_locations["enemy"]
     block_locations = object_locations["block"]
-    item_locations = object_locations["item"]
-
 
     if mario_locations:
         mario_location, mario_dimensions, mario_name = mario_locations[0]
@@ -288,7 +283,6 @@ def make_action(screen, info, step, env, prev_action, done):
  
         for block_location, block_dimensions, block_name in block_locations:
             block_x, block_y = block_location
-            block_width, block_height = block_dimensions
 
             if block_name == "pipe":
                 # Check if the pipe is in front of Mario
@@ -298,17 +292,14 @@ def make_action(screen, info, step, env, prev_action, done):
                     
         for block_location, block_dimensions, block_name in block_locations:
             block_x, block_y = block_location
-            block_width, block_height = block_dimensions
+
             if block_name == "stair":
-                #print("Stair detected")
-                # Check if there's a stair in front of Mario
                 if block_x > mario_x and block_x - (mario_x + mario_width) < 7:
                     env.step(RIGHT)
                     done = jump(20,done)
                     
         if detect_ground(screen):
             done = jump(55,done)
-            print("No ground detected")
             return RIGHT, done
 
     return RIGHT, done
@@ -320,7 +311,6 @@ def jump(x, done):
             return True  # Return True if terminated early
         _, _, done, _, _ = env.step(RIGHT_JUMP)  # Update done variable
     return False 
-
 
 
 ################################################################################

@@ -11,7 +11,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 
 global_last_info = None
 
-
+# https://python.plainenglish.io/build-an-ai-model-to-play-super-mario-7607b1ec1e17
 class TrainAndLoggingCallback(BaseCallback):
     def __init__(self, check_freq, save_path, verbose=1):
         super(TrainAndLoggingCallback, self).__init__(verbose)
@@ -115,16 +115,11 @@ def make_env():
 
 
 if __name__ == '__main__':
-    
-    # Vectorize environment to run 4 at a time
     num_envs = 1
     env = SubprocVecEnv([make_env for i in range(num_envs)])
-
-    # Wrap the vectorized environment
     env = VecFrameStack(env, n_stack=4, channels_order="last")
 
-    # Run training or model based on CLI value
-    # If value given then run that model
+
     params = {
         "verbose": 1,
         "tensorboard_log": "./logs"
